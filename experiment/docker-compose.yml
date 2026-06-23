@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  mongo1:
+    image: mongo:7.0
+    container_name: mongo1
+    command: ["--replSet", "rs0", "--bind_ip_all", "--oplogSize", "1024"]
+    ports: ["27017:27017"]
+    networks: [rs0]
+
+  mongo2:
+    image: mongo:7.0
+    container_name: mongo2
+    command: ["--replSet", "rs0", "--bind_ip_all", "--oplogSize", "1024"]
+    ports: ["27018:27017"]
+    networks: [rs0]
+
+  mongo3:
+    image: mongo:7.0
+    container_name: mongo3
+    command: ["--replSet", "rs0", "--bind_ip_all", "--oplogSize", "1024"]
+    ports: ["27019:27017"]
+    networks: [rs0]
+
+networks:
+  rs0:
+    driver: bridge
