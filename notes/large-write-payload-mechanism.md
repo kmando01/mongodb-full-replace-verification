@@ -31,7 +31,7 @@ WiredTiger 공식 docs (`tune_cache.html`):
 > "Application threads will be throttled if the percentage of dirty data reaches the `eviction_dirty_trigger`."
 
 | 파라미터 | 기본값 | 의미 |
-|---|---|---|
+| --- | --- | --- |
 | `eviction_dirty_target` | 5% | background eviction 시작 |
 | `eviction_dirty_trigger` | 20% | application thread가 eviction에 강제 참여 |
 
@@ -46,7 +46,7 @@ application thread가 강제 참여한다는 건 *client request를 처리할 th
 - `replaceOne(doc)` — 도큐먼트 전체가 oplog entry에 기록
 - `updateOne({$set: {field: v}})` — 변경 필드만 diff로 기록
 
-**함정**: 배열을 통째로 교체하는 `$set` (`$set: {arr: [...]}`)은 배열 전체가 diff에 그대로 인라인됨. 위치 지정 연산자(`arr.$.field`)는 sub-document diff로 축약되어 인라인 회피.
+**함정**: 배열을 통째로 교체하는 `$set` (`$set: {arr: [...]}`)은 배열 전체가 diff에 그대로 인라인됨. 위치 지정 연산자(`arr.$.field`)는 sub-document diff(`sfoo: {u0: ...}`)로 축약되어 인라인 회피.
 
 ### 3. 트랜잭션이 16MB를 넘으면 chained applyOps로 쪼개진다
 
@@ -94,15 +94,15 @@ Replica Set Oplog 공식 docs:
 
 > "Unlike other capped collections, the oplog can grow past its configured size limit to avoid deleting the majority commit point."
 
-→ 4.0+ MongoDB에서 oplog 설정값은 **최댓값이 아니라 최솟값**으로 동작. secondary가 majority lag을 넘어 떨어지지 않도록 oplog가 보호된다.
+→ 4.0+ MongoDB에서 oplog 설정값은 **최댓값이 아니라 최솟값**으로 동작. secondary가 majority lag을 넘어 떨어지지 않도록 oplog가 보호된다. 윈도우(시간)가 줄어도 디스크는 계속 증가할 수 있어, "oplog 윈도우 회복"보다 "oplog bloat 회복"이 정확한 표현.
 
-`replSetResizeOplog` 공식 docs:
+replSetResizeOplog 공식 docs:
 
 > "If the oplog grows beyond its maximum size, the `mongod` may continue to hold that disk space even if the oplog returns to its maximum size or is configured for a smaller maximum size."
 >
 > "Reducing the oplog size does not immediately reclaim that disk space."
 
-→ "oplog 윈도우 회복"과 "디스크 반환"은 별개. 디스크 회수는 `compact` 명령을 `local.oplog.rs`에 직접 실행해야 한다.
+→ **oplog 윈도우 회복 ≠ 디스크 반환.** 디스크 회수는 `compact` 명령을 `local.oplog.rs`에 직접 실행해야 한다.
 
 ### 8. MongoDB 8.0의 writer/applier 분리
 
@@ -115,7 +115,7 @@ Replica Set Oplog 공식 docs:
 > "Starting in MongoDB 8.0, write operations that use the 'majority' write concern return an acknowledgment when the majority of replica set members have written the oplog entry for the change. In previous releases, these operations would wait and return an acknowledgment after the majority of replica set members applied the change."
 
 | | 7.0 이하 | 8.0+ |
-|---|---|---|
+| --- | --- | --- |
 | 수신·적용 | 단일 thread | writer/applier 분리 |
 | 측정 지표 | `metrics.repl.buffer.{count, sizeBytes}` | `metrics.repl.buffer.write.sizeBytes` (수신) / `.apply.sizeBytes` (적용) |
 | `w:majority` 반환 시점 | 과반이 **applied** | 과반이 **written (received)** |
@@ -135,13 +135,13 @@ Replica Set Oplog 공식 docs:
 ### 언제 Full Replace가 의도적으로 옳은가
 
 - 도큐먼트 전체가 의미적으로 한 단위로 갈아끼워질 때 (캐시 entry 통째 교체)
-- 변경 필드가 너무 많아 `$set` 명시가 더 복잡해질 때
-- 마이그레이션·일괄 보정 작업 (maintenance window 필요)
+- 변경 필드가 너무 많아 `$set` 명시가 더 복잡해질 때 (구조적으로 통째 교체가 자연스러움)
+- 마이그레이션·일괄 보정 작업 (이때는 maintenance window를 잡고 진행)
 
 ### 배열 갱신 패턴
 
 | 패턴 | 효과 |
-|---|---|
+| --- | --- |
 | `$set: {arr: <newArr>}` | ❌ 배열 전체 oplog 인라인 — 회피 |
 | `arr.$.field` | 단일 매칭 element 갱신 |
 | `arr.$[<id>].field` + `arrayFilters` | 조건 매칭 다수 element 갱신 |
@@ -150,13 +150,15 @@ Replica Set Oplog 공식 docs:
 ### 운영 모니터링 지표
 
 | 지표 | 출처 | 임계 |
-|---|---|---|
+| --- | --- | --- |
 | WiredTiger dirty % | `db.serverStatus().wiredTiger.cache["tracked dirty bytes"] / ["maximum bytes configured"]` | 5% target, 20% trigger |
-| Oplog entry max size | `db.oplog.rs.aggregate([{$sample:{size:1000}}, {$project:{sz:{$bsonSize:"$$ROOT"}}}])` | 16MB 근접 시 chained 임박 |
+| Oplog entry max size | `db.oplog.rs.aggregate([{$sample:{size:1000}},{$project:{sz:{$bsonSize:"$$ROOT"}}}])` | 16MB 근접 시 chained 임박 |
 | Secondary lag | `rs.status()` optime gap | SLA 의존 |
 | Flow control | `db.serverStatus().flowControl.isLagged` | `true`면 primary가 throttled |
 | Slow oplog apply | REPL 컴포넌트 로그: `applied op: ... took Nms` | 프로파일링·logLevel 무관, 항상 기록 |
 | (8.0+) Apply buffer | `metrics.repl.buffer.apply.sizeBytes` | write buffer 안정·apply 증가 → applier 병목 |
+| Oplog bloat | `db.oplog.rs.stats().size` | 설정 크기 초과 여부 별도 추적 |
+| Oplog 윈도우 | `rs.printReplicationInfo()` → `timeDiffHours` | 윈도우와 디스크는 별개로 모니터링 |
 
 ### Long-tail 도큐먼트의 함정
 
@@ -168,14 +170,15 @@ Replica Set Oplog 공식 docs:
 
 - **MVCC와 long-running transaction**: WiredTiger는 MVCC라 long-running transaction이 있으면 cache에서 오래된 버전을 못 비움 — dirty bytes 증가와 별개의 cache pressure 경로
 - **TransactionTooLargeForCache**: 트랜잭션이 cache에 못 들어갈 정도면 abort. 별도 abort 경로 (`transactionLifetimeLimitSeconds` 60초 timeout과 별개)
-- **Partial Index의 인덱스 페이지 dirty write**: filter 경계 자주 넘는 필드를 partial index로 잡으면 인덱스 페이지에 dirty write가 발생 — dirty bytes 누적이라는 같은 메커니즘이 다른 경로에서 발현
+- **`transactionLifetimeLimitSeconds` 60초**: 트랜잭션이 60초를 넘으면 abort. "45초 랙"의 원인이 실제 replication lag(시나리오 A)인지, abort 후 재시도 누적(시나리오 B)인지, cache 초과 abort(시나리오 C)인지 로그로 구분해야 함
+- **Partial Index의 인덱스 페이지 dirty write**: filter 경계 자주 넘는 필드를 partial index로 잡으면 인덱스 페이지에 dirty write가 발생 — 본 노트와는 별개 함정이지만 dirty bytes 누적이라는 같은 메커니즘이 다른 경로에서 발현
 
 ---
 
-## 참고 — 1차 자료 (전부 fetch 완료)
+## 참고 — 1차 자료
 
 | 자료 | URL |
-|---|---|
+| --- | --- |
 | WiredTiger Cache & Eviction Tuning | https://source.wiredtiger.com/mongodb-6.0/tune_cache.html |
 | MongoDB `$set` Operator | https://www.mongodb.com/docs/manual/reference/operator/update/set/ |
 | Transactions Production Considerations | https://www.mongodb.com/docs/manual/core/transactions-production-consideration/ |
